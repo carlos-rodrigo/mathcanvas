@@ -28,16 +28,19 @@ export interface UseSpeechOutputReturn {
 export function useSpeechOutput(
   provider: TTSProvider | null,
 ): UseSpeechOutputReturn {
-  const [playbackState, setPlaybackState] = useState<PlaybackState>("idle");
+  const [playbackState, setPlaybackState] = useState<PlaybackState>(
+    () => provider?.state ?? "idle",
+  );
   const providerRef = useRef(provider);
-  providerRef.current = provider;
+
+  // Keep ref in sync outside of render.
+  useEffect(() => {
+    providerRef.current = provider;
+  }, [provider]);
 
   // Subscribe to the provider's state changes.
   useEffect(() => {
     if (!provider) return;
-
-    // Sync immediately in case we mount while speaking.
-    setPlaybackState(provider.state);
 
     const unsub = provider.onStateChange((next) => {
       setPlaybackState(next);
