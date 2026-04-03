@@ -1,65 +1,223 @@
-import Image from "next/image";
+"use client";
+
+import { useCallback, useReducer } from "react";
+
+import WhiteboardCanvas from "@/components/canvas/WhiteboardCanvas";
+import ExercisePanel from "@/components/tutor/ExercisePanel";
+import TutorControls from "@/components/tutor/TutorControls";
+import TutorHeader from "@/components/tutor/TutorHeader";
+import type { CanvasCommand, CanvasElement } from "@/lib/commands/canvasTypes";
+import {
+  INITIAL_TUTOR_STATE,
+  type TutorPhase,
+  type TutorState,
+} from "@/types/tutorState";
+
+// ── Reducer ──────────────────────────────────────────────────────────
+
+type Action =
+  | { type: "SET_PHASE"; phase: TutorPhase }
+  | { type: "APPLY_COMMANDS"; commands: CanvasCommand[]; speech: string }
+  | { type: "SET_EXERCISE"; exercise: TutorState["exercise"] }
+  | { type: "SET_ERROR"; message: string }
+  | { type: "RESET" };
+
+function applyCommands(
+  current: CanvasElement[],
+  commands: CanvasCommand[],
+): CanvasElement[] {
+  let next = [...current];
+  for (const cmd of commands) {
+    if (cmd.action === "clear") {
+      next = cmd.targetId
+        ? next.filter((el) => el.id !== cmd.targetId)
+        : [];
+    } else {
+      // Replace if same id exists, otherwise append.
+      const idx = next.findIndex((el) => el.id === cmd.element.id);
+      if (idx >= 0) {
+        next[idx] = cmd.element;
+      } else {
+        next.push(cmd.element);
+      }
+    }
+  }
+  return next;
+}
+
+function tutorReducer(state: TutorState, action: Action): TutorState {
+  switch (action.type) {
+    case "SET_PHASE":
+      return { ...state, phase: action.phase, errorMessage: null };
+    case "APPLY_COMMANDS":
+      return {
+        ...state,
+        phase: "presenting",
+        canvasElements: applyCommands(
+          state.canvasElements,
+          action.commands,
+        ),
+        speechText: action.speech,
+        errorMessage: null,
+      };
+    case "SET_EXERCISE":
+      return { ...state, exercise: action.exercise };
+    case "SET_ERROR":
+      return { ...state, phase: "error", errorMessage: action.message };
+    case "RESET":
+      return INITIAL_TUTOR_STATE;
+    default:
+      return state;
+  }
+}
+
+// ── Demo payload used during the greeting phase ──────────────────────
+
+const GREETING_SPEECH =
+  "¡Hola! Soy tu tutor de matemáticas. Presiona el botón del micrófono para empezar.";
+
+const GREETING_COMMANDS: CanvasCommand[] = [
+  {
+    action: "draw",
+    element: {
+      type: "TextBubble",
+      id: "greeting-bubble",
+      position: { x: 200, y: 220 },
+      text: "¡Bienvenido a MathCanvas!",
+      fontSize: 22,
+      backgroundColor: "#e0e7ff",
+      textColor: "#3730a3",
+      maxWidth: 380,
+    },
+  },
+  {
+    action: "draw",
+    element: {
+      type: "FractionDisplay",
+      id: "greeting-fraction",
+      position: { x: 650, y: 230 },
+      numerator: 1,
+      denominator: 2,
+      fontSize: 36,
+      color: "#6366f1",
+      label: "ejemplo",
+    },
+  },
+];
+
+// ── Page component ───────────────────────────────────────────────────
 
 export default function Home() {
+  const [state, dispatch] = useReducer(tutorReducer, INITIAL_TUTOR_STATE);
+
+  // Simulate the greeting on first mount-like click or auto-trigger.
+  // In a real integration this calls the orchestrator API.
+  const ensureGreeted = useCallback(() => {
+    if (state.phase === "greeting") {
+      dispatch({
+        type: "APPLY_COMMANDS",
+        commands: GREETING_COMMANDS,
+        speech: GREETING_SPEECH,
+      });
+    }
+  }, [state.phase]);
+
+  // ── Voice control handlers ───────────────────────────────────────
+
+  const handleRecord = useCallback(() => {
+    ensureGreeted();
+    if (state.phase === "idle" || state.phase === "presenting") {
+      dispatch({ type: "SET_PHASE", phase: "recording" });
+      // Real implementation: start mic recording via Web Audio / MediaRecorder.
+    }
+  }, [state.phase, ensureGreeted]);
+
+  const handleStop = useCallback(() => {
+    if (state.phase === "recording") {
+      dispatch({ type: "SET_PHASE", phase: "processing" });
+      // Simulate assistant response after a short delay.
+      setTimeout(() => {
+        dispatch({ type: "SET_PHASE", phase: "idle" });
+      }, 1500);
+    }
+  }, [state.phase]);
+
+  const handleReplay = useCallback(() => {
+    // In a real app: re-trigger TTS with state.speechText.
+    // For now this is a no-op placeholder.
+  }, []);
+
+  // Auto-greet on first render via a one-shot effect substitute:
+  // We trigger greeting commands when phase is still "greeting".
+  if (state.phase === "greeting") {
+    // Schedule outside of render to avoid dispatch during render.
+    queueMicrotask(() => {
+      dispatch({
+        type: "APPLY_COMMANDS",
+        commands: GREETING_COMMANDS,
+        speech: GREETING_SPEECH,
+      });
+    });
+  }
+
+  // ── isSpeaking placeholder (no TTS provider wired yet) ───────────
+  const isSpeaking = state.phase === "presenting";
+
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
-        </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
+    <div className="flex h-full min-h-screen flex-col bg-slate-50 font-sans dark:bg-slate-950">
+      {/* ── Header / Status bar ──────────────────────────── */}
+      <TutorHeader phase={state.phase} speechText={state.speechText} />
+
+      {/* ── Whiteboard (fills remaining space) ───────────── */}
+      <main className="relative flex flex-1 items-center justify-center overflow-hidden p-4">
+        {/* Processing overlay */}
+        {state.phase === "processing" && (
+          <div className="absolute inset-0 z-10 flex items-center justify-center bg-white/60 backdrop-blur-sm dark:bg-slate-950/60">
+            <div className="flex flex-col items-center gap-3">
+              <span className="inline-block h-10 w-10 animate-spin rounded-full border-4 border-indigo-500 border-t-transparent" />
+              <p className="text-sm font-medium text-slate-600 dark:text-slate-300">
+                Procesando tu respuesta…
+              </p>
+            </div>
+          </div>
+        )}
+
+        {/* Error overlay */}
+        {state.phase === "error" && (
+          <div className="absolute inset-0 z-10 flex items-center justify-center bg-white/60 backdrop-blur-sm dark:bg-slate-950/60">
+            <div className="flex max-w-sm flex-col items-center gap-3 rounded-xl border border-red-200 bg-white p-6 text-center shadow-lg dark:border-red-800 dark:bg-slate-900">
+              <span className="text-3xl">⚠️</span>
+              <p className="text-sm text-red-600 dark:text-red-400">
+                {state.errorMessage ?? "Ocurrió un error inesperado."}
+              </p>
+              <button
+                type="button"
+                onClick={() => dispatch({ type: "RESET" })}
+                className="mt-2 rounded-lg bg-red-500 px-4 py-2 text-sm font-medium text-white transition hover:bg-red-600"
+              >
+                Reintentar
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Canvas */}
+        <div className="h-full w-full max-w-4xl rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900">
+          <WhiteboardCanvas elements={state.canvasElements} />
         </div>
       </main>
+
+      {/* ── Exercise panel (overlays bottom of canvas area) ── */}
+      <ExercisePanel exercise={state.exercise} />
+
+      {/* ── Voice controls ───────────────────────────────── */}
+      <TutorControls
+        phase={state.phase}
+        isSpeaking={isSpeaking}
+        onRecord={handleRecord}
+        onStop={handleStop}
+        onReplay={handleReplay}
+      />
     </div>
   );
 }
